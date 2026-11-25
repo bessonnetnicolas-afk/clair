@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e9e57">
+  <title>Clair — scan de produits</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ===== EN-TÊTE ===== -->
+  <header class="top">
+    <h1>Clair</h1>
+    <span id="net" class="net"></span>
+  </header>
+
+  <main>
+    <!-- ===== VUE SCAN ===== -->
+    <section id="v-scan" class="view active">
+      <div class="cam">
+        <video id="video" playsinline muted></video>
+        <div class="frame"></div>
+      </div>
+      <p id="scan-msg" class="hint">Vise le code-barres du produit.</p>
+      <button id="btn-scan" class="primary">Démarrer le scan</button>
+      <form id="f-manual" class="inline">
+        <input id="manual" inputmode="numeric" pattern="[0-9]*" placeholder="Ou saisis le code-barres">
+        <button>OK</button>
+      </form>
+    </section>
+
+    <!-- ===== VUE RECHERCHE ===== -->
+    <section id="v-search" class="view">
+      <form id="f-search" class="inline">
+        <input id="q" type="search" placeholder="Nom ou marque (ex : yaourt nature)">
+        <button>Chercher</button>
+      </form>
+      <p id="search-msg" class="hint"></p>
+      <ul id="search-res" class="list"></ul>
+    </section>
+
+    <!-- ===== VUE HISTORIQUE ===== -->
+    <section id="v-history" class="view">
+      <div class="row">
+        <h2>Historique</h2>
+        <button id="btn-clear" class="ghost">Vider</button>
+      </div>
+      <ul id="hist" class="list"></ul>
+    </section>
+
+    <!-- ===== VUE RÉGLAGES ===== -->
+    <section id="v-settings" class="view">
+      <h2>Poids de la note</h2>
+      <p class="hint">Règle l'importance de chaque critère. La note est la moyenne pondérée des critères disponibles.</p>
+      <div id="weights"></div>
+
+      <h2>Profils et alertes</h2>
+      <p class="hint">Les alertes des profils actifs s'affichent sur chaque fiche produit.</p>
+      <div id="profiles"></div>
+      <button id="btn-add-profile" class="ghost">+ Ajouter un profil</button>
+
+      <h2>À propos</h2>
+      <div class="about">
+        <p><strong>Information, pas un avis médical.</strong> Les données viennent d'Open Food Facts, une base collaborative qui peut être incomplète ou erronée. En cas d'allergie, vérifie toujours l'étiquette.</p>
+        <p>Données : <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, sous licence <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>.</p>
+        <p>Tes données (historique, profils, réglages) restent sur ton téléphone.</p>
+        <p class="hint" id="version"></p>
+      </div>
+    </section>
+
+    <!-- ===== VUE FICHE PRODUIT (remplie par app.js) ===== -->
+    <section id="v-product" class="view"></section>
+  </main>
+
+  <!-- ===== NAVIGATION ===== -->
+  <nav class="tabs">
+    <button data-view="scan" class="on">📷<span>Scan</span></button>
+    <button data-view="search">🔎<span>Recherche</span></button>
+    <button data-view="history">🕘<span>Historique</span></button>
+    <button data-view="settings">⚙️<span>Réglages</span></button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
