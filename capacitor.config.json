@@ -1,5 +1,12 @@
 {
   "appId": "space.bessonnetnicolas.clair",
   "appName": "Clair",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "statsUrl": "",
+      "appReadyTimeout": 10000
+    }
+  }
 }

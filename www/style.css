@@ -12,7 +12,7 @@ input { font:inherit; padding:.6rem .8rem; border:1px solid var(--line); border-
 .hint { color:var(--muted); font-size:.9rem; }
 
 /* ===== EN-TÊTE ===== */
-.top { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; padding:.8rem 1rem; background:var(--green); color:#fff;padding-top:calc(.8rem + env(safe-area-inset-top)); }
+.top { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; padding:.8rem 1rem; background:var(--green); color:#fff; padding-top:calc(.8rem + env(safe-area-inset-top)); }
 .net { font-size:.8rem; opacity:.9; }
 
 /* ===== VUES ===== */

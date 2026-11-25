@@ -9,6 +9,10 @@ const APP_VERSION = '1.0.0';
 const SERVER = 'https://clair.bessonnetnicolas.space';
 // true quand l'appli tourne dans l'APK Android (Capacitor)
 const isNative = !!window.Capacitor?.isNativePlatform?.();
+// Mise à jour à distance du code (Capgo) : on confirme tout de suite que
+// cette version démarre bien, sinon le plugin revient à la version précédente
+const Updater = window.capacitorCapacitorUpdater?.CapacitorUpdater;
+if (isNative && Updater) Updater.notifyAppReady();
 const OFF_BASE = 'https://world.openfoodfacts.org';
 // Champs demandés à l'API (limite le volume téléchargé)
 const OFF_FIELDS = ['code','product_name','product_name_fr','brands','quantity','image_front_small_url','image_front_url',
@@ -744,7 +748,29 @@ async function checkUpdate() {
   } catch (_) {}
 }
 
-/* ---------- 18. DÉMARRAGE ---------- */
+/* ---------- 18. MISE À JOUR AUTOMATIQUE DU CODE (sans réinstaller) ---------- */
+// GitHub publie sur le serveur live/latest.json { build, url } + un zip du dossier www.
+// Si le build du serveur est plus récent, on le télécharge en arrière-plan ;
+// il s'applique quand l'appli passe en arrière-plan ou au prochain lancement.
+async function checkLiveUpdate() {
+  if (!isNative || !Updater) return;
+  try {
+    const mine = await (await fetch('build.json', { cache: 'no-store' })).json();
+    $('#version').textContent = `Version ${APP_VERSION} · build ${mine.build}`;
+    const r = await fetch(`${SERVER}/live/latest.json`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const latest = await r.json();
+    if (!(Number(latest.build) > Number(mine.build))) return;
+    const version = String(latest.build);
+    // Déjà téléchargé lors d'un précédent lancement ?
+    const { bundles } = await Updater.list();
+    let bundle = bundles.find(b => b.version === version && b.status !== 'error');
+    if (!bundle) bundle = await Updater.download({ url: latest.url, version });
+    await Updater.next({ id: bundle.id });
+  } catch (_) { /* hors ligne ou serveur indisponible : on réessaiera */ }
+}
+
+/* ---------- 19. DÉMARRAGE ---------- */
 function updateNet() { $('#net').textContent = navigator.onLine ? '' : '● Hors ligne'; }
 window.addEventListener('online', () => { updateNet(); Sync.run().catch(() => {}); });
 window.addEventListener('offline', updateNet);
@@ -761,5 +787,6 @@ window.addEventListener('offline', updateNet);
   if (isNative) $('.cam').hidden = true;
   loadReferentials();
   checkUpdate();
+  checkLiveUpdate();
   Sync.run().catch(() => {});
 })();
