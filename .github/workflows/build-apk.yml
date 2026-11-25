@@ -35,7 +35,8 @@ jobs:
 
       # 2. Numéro de build (= numéro du run GitHub), lu par l'appli
       - name: Numéro de build
-        run: echo "{\"build\": ${{ github.run_number }}}" > www/build.json
+        run: |
+          echo "{\"build\": $GITHUB_RUN_NUMBER}" > www/build.json
 
       # 3. Copie l'appli web dans le projet Android
       - run: npx cap sync android
