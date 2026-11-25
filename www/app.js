@@ -769,8 +769,8 @@ async function loadReferentials() {
   const cached = await DB.get('kv', 'ref');
   if (cached?.additives) ADDITIVES = cached.additives;
   try {
-    const r = await fetch(`${SERVER}/data/referentiels.json`, { cache: 'no-store' });
-    if (r.ok) { const j = await r.json(); if (j.additives) { ADDITIVES = j.additives; await DB.put('kv', j, 'ref'); } }
+    const j = await getJSON(`${SERVER}/data/referentiels.json`);
+    if (j.additives) { ADDITIVES = j.additives; await DB.put('kv', j, 'ref'); }
   } catch (_) { /* hors ligne : on garde la version en cache */ }
 }
 
@@ -781,8 +781,7 @@ const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').m
 async function checkUpdate() {
   if (!isNative) return;
   try {
-    const r = await fetch(`${SERVER}/version.json`, { cache: 'no-store' });
-    const j = await r.json();
+    const j = await getJSON(`${SERVER}/version.json`);
     if (j.version && newer(j.version, APP_VERSION)) {
       const u = $('#update');
       u.innerHTML = `Nouvelle version ${esc(j.version)} disponible${j.notes ? ' : ' + esc(j.notes) : ''}. <a href="${esc(j.apk)}" target="_blank" rel="noopener">Télécharger</a>`;
@@ -796,21 +795,39 @@ async function checkUpdate() {
 // Si le build du serveur est plus récent, on le télécharge en arrière-plan ;
 // il s'applique quand l'appli passe en arrière-plan ou au prochain lancement.
 async function checkLiveUpdate() {
-  if (!isNative || !Updater) return;
+  const status = t => { const el = $('#upd-status'); if (el) el.textContent = 'Mise à jour : ' + t; };
+  if (!isNative) return;
+  if (!Updater) return status('module absent (réinstaller l’APK)');
   try {
     const mine = await (await fetch('build.json', { cache: 'no-store' })).json();
     $('#version').textContent = `Version ${APP_VERSION} · build ${mine.build}`;
-    const r = await fetch(`${SERVER}/live/latest.json`, { cache: 'no-store' });
-    if (!r.ok) return;
-    const latest = await r.json();
-    if (!(Number(latest.build) > Number(mine.build))) return;
+    status('vérification…');
+    const latest = await getJSON(`${SERVER}/live/latest.json`);
+    if (!(Number(latest.build) > Number(mine.build))) return status('à jour');
     const version = String(latest.build);
     // Déjà téléchargé lors d'un précédent lancement ?
     const { bundles } = await Updater.list();
     let bundle = bundles.find(b => b.version === version && b.status !== 'error');
-    if (!bundle) bundle = await Updater.download({ url: latest.url, version });
+    if (!bundle) {
+      status(`téléchargement du build ${version}…`);
+      bundle = await Updater.download({ url: latest.url, version });
+    }
     await Updater.next({ id: bundle.id });
-  } catch (_) { /* hors ligne ou serveur indisponible : on réessaiera */ }
+    status(`build ${version} prêt : ferme complètement l’appli puis rouvre-la`);
+  } catch (e) { status('erreur — ' + (e?.message || e)); }
+}
+
+// Lecture d'un JSON du serveur : canal natif dans l'APK (pas de blocage CORS)
+async function getJSON(url) {
+  const http = window.capacitorExports?.CapacitorHttp;
+  if (isNative && http) {
+    const r = await http.get({ url: url + '?t=' + Date.now() });
+    if (r.status !== 200) throw new Error('HTTP ' + r.status);
+    return typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+  }
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
 }
 
 /* ---------- 19. LISTE DE COURSES ---------- */
