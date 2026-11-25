@@ -63,6 +63,11 @@ jobs:
           mkdir -p deploy
           (cd www && zip -qr ../deploy/web-$N.zip .)
           echo "{\"build\": $N, \"url\": \"$LIVE_URL/web-$N.zip\"}" > deploy/latest.json
+          # Autorise l'appli à lire latest.json (CORS) et désactive le cache
+          printf '%s\n' '<IfModule mod_headers.c>' \
+            '  Header set Access-Control-Allow-Origin "*"' \
+            '  Header set Cache-Control "no-store"' \
+            '</IfModule>' > deploy/.htaccess
 
       # 6. Envoi sur Infomaniak (seulement si les secrets FTP sont renseignés)
       - name: Envoi sur le serveur
