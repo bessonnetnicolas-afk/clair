@@ -1,3 +1,10 @@
+# =========================================================
+# Clair — compilation de l'APK + publication de la mise à jour automatique
+# À chaque envoi sur main :
+#   1. fabrique l'APK (à télécharger dans « Artifacts »)
+#   2. envoie le code web sur Infomaniak (dossier live/) : les téléphones
+#      se mettent à jour tout seuls, sans réinstallation
+# =========================================================
 name: Build APK
 
 on:
@@ -5,10 +12,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  # Adresse publique du dossier live/ sur ton serveur
+  LIVE_URL: https://clair.bessonnetnicolas.space/live
+  # Sert seulement à savoir si les secrets FTP existent
+  FTP_SERVER: ${{ secrets.FTP_SERVER }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # 1. Récupère le code et installe les outils
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -18,7 +32,15 @@ jobs:
           distribution: temurin
           java-version: 21
       - run: npm install --no-audit --no-fund
+
+      # 2. Numéro de build (= numéro du run GitHub), lu par l'appli
+      - name: Numéro de build
+        run: echo "{\"build\": ${{ github.run_number }}}" > www/build.json
+
+      # 3. Copie l'appli web dans le projet Android
       - run: npx cap sync android
+
+      # 4. Clé de signature + compilation de l'APK
       - name: Clé de signature
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/clair.keystore
       - name: Compilation
@@ -32,3 +54,23 @@ jobs:
         with:
           name: clair-apk
           path: android/app/build/outputs/apk/release/*.apk
+
+      # 5. Prépare la mise à jour automatique : zip du code web + latest.json
+      - name: Paquet de mise à jour
+        run: |
+          N=${{ github.run_number }}
+          mkdir -p deploy
+          (cd www && zip -qr ../deploy/web-$N.zip .)
+          echo "{\"build\": $N, \"url\": \"$LIVE_URL/web-$N.zip\"}" > deploy/latest.json
+
+      # 6. Envoi sur Infomaniak (seulement si les secrets FTP sont renseignés)
+      - name: Envoi sur le serveur
+        if: env.FTP_SERVER != ''
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./deploy/
+          server-dir: ${{ secrets.FTP_DIR }}
