@@ -19,6 +19,8 @@
 
   <!-- ===== BANDEAU MISE À JOUR (affiché si nouvelle version) ===== -->
   <div id="update" class="update" hidden></div>
+  <!-- ===== BANDEAU COMPARAISON EN COURS ===== -->
+  <div id="compare-banner" class="update" hidden></div>
 
   <main>
     <!-- ===== VUE SCAN ===== -->
@@ -43,6 +45,16 @@
       </form>
       <p id="search-msg" class="hint"></p>
       <ul id="search-res" class="list"></ul>
+    </section>
+
+    <!-- ===== VUE LISTE DE COURSES ===== -->
+    <section id="v-list" class="view">
+      <div class="row">
+        <h2>Liste de courses</h2>
+        <button id="btn-shop-clean" class="ghost">Retirer les cochés</button>
+      </div>
+      <div id="shop-summary"></div>
+      <ul id="shop" class="list"></ul>
     </section>
 
     <!-- ===== VUE HISTORIQUE ===== -->
@@ -85,6 +97,7 @@
   <nav class="tabs">
     <button data-view="scan" class="on">📷<span>Scan</span></button>
     <button data-view="search">🔎<span>Recherche</span></button>
+    <button data-view="list">🛒<span>Liste</span></button>
     <button data-view="history">🕘<span>Historique</span></button>
     <button data-view="settings">⚙️<span>Réglages</span></button>
   </nav>

@@ -86,6 +86,21 @@ td:last-child { text-align:right; }
 .danger-btn { background:#c0392b; }
 textarea { width:100%; min-height:120px; font-family:monospace; font-size:.75rem; }
 
+/* ===== LOT 2 : actions, liste, comparatif, ajout produit ===== */
+.actions { display:flex; gap:.5rem; margin-bottom:.8rem; }
+.actions button { flex:1; }
+.item.done { opacity:.55; }
+.item.done .name { text-decoration:line-through; }
+.item .chk { width:22px; height:22px; flex-shrink:0; accent-color:var(--green); }
+.cmp th { font-size:.82rem; font-weight:600; vertical-align:top; padding:.3rem; cursor:pointer; width:38%; }
+.cmp th img { width:56px; height:56px; object-fit:contain; display:block; margin:0 auto .3rem; }
+.cmp td { text-align:center; }
+.cmp td:first-child { text-align:left; color:var(--muted); font-size:.85rem; }
+.cmp td.win { color:var(--green); font-weight:700; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+.photo { display:flex; flex-direction:column; gap:.3rem; font-size:.88rem; background:#eef1ef; padding:.6rem; border-radius:10px; }
+.form h3 { font-size:.95rem; margin:.6rem 0 0; }
+
 /* ===== NAVIGATION BAS ===== */
 .tabs { position:fixed; bottom:0; left:0; right:0; display:flex; background:#fff; border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
 .tabs button { flex:1; background:none; color:var(--muted); border-radius:0; display:flex; flex-direction:column; align-items:center; font-size:1.2rem; padding:.45rem 0; }

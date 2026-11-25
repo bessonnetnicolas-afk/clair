@@ -17,7 +17,9 @@ const OFF_BASE = 'https://world.openfoodfacts.org';
 // Champs demandés à l'API (limite le volume téléchargé)
 const OFF_FIELDS = ['code','product_name','product_name_fr','brands','quantity','image_front_small_url','image_front_url',
   'nutriscore_grade','nova_group','additives_tags','allergens_tags','traces_tags','ingredients_analysis_tags',
-  'labels_tags','ingredients_text','ingredients_text_fr','nutriments'].join(',');
+  'labels_tags','ingredients_text','ingredients_text_fr','nutriments','categories_tags'].join(',');
+// Alternatives : produits de la même catégorie vendus en France
+const urlAlt = cat => `${OFF_BASE}/api/v2/search?categories_tags=${encodeURIComponent(cat)}&countries_tags=en:france&page_size=50&fields=${OFF_FIELDS}`;
 const urlProduct = c => `${OFF_BASE}/api/v2/product/${c}.json?lc=fr&fields=${OFF_FIELDS}`;
 // Recherche plein texte, limitée aux produits vendus en France
 const urlSearch = q => `${OFF_BASE}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=fr&tagtype_0=countries&tag_contains_0=contains&tag_0=france&fields=${OFF_FIELDS}`;
@@ -92,13 +94,14 @@ const DB = (() => {
   let dbp;
   function open() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('clair', 2);
+      const r = indexedDB.open('clair', 3);
       r.onupgradeneeded = () => {
         const db = r.result, has = n => db.objectStoreNames.contains(n);
         if (!has('products')) db.createObjectStore('products', { keyPath: 'code' });
         if (!has('history')) db.createObjectStore('history', { keyPath: 'code' });
         if (!has('kv')) db.createObjectStore('kv');
         if (!has('pending')) db.createObjectStore('pending', { keyPath: 'id' });
+        if (!has('list')) db.createObjectStore('list', { keyPath: 'code' }); // liste de courses
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -158,6 +161,7 @@ function normalize(p) {
     analysis: p.ingredients_analysis_tags || [],
     labels: p.labels_tags || [],
     ingredients: p.ingredients_text_fr || p.ingredients_text || '',
+    categories: p.categories_tags || [],
     n: {
       kcal: n['energy-kcal_100g'], fat: n['fat_100g'], sat: n['saturated-fat_100g'],
       carbs: n['carbohydrates_100g'], sugars: n['sugars_100g'], fiber: n['fiber_100g'],
@@ -272,6 +276,7 @@ function show(view) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   if (view !== 'product') prevView = view;
   if (view === 'history') renderHistory();
+  if (view === 'list') renderList();
   if (view === 'settings') renderSettings();
   window.scrollTo(0, 0);
 }
@@ -352,7 +357,7 @@ async function openProduct(code) {
   try {
     const r = await getProduct(code);
     if (r.product) { await addHistory(r.product.code); renderProduct(r.product, r.offline); }
-    else if (r.notFound) renderMessage(`Produit inconnu (${esc(r.code)})`, 'Ce produit n’est pas encore dans Open Food Facts. L’ajout depuis l’appli arrive dans la prochaine version.');
+    else if (r.notFound) renderAddForm(r.code);
     else renderMessage('Hors ligne', 'Ce produit n’a jamais été scanné sur ce téléphone. Réessaie une fois connecté.');
   } catch (e) {
     renderMessage('Erreur réseau', 'Impossible de joindre Open Food Facts. Réessaie dans un instant.');
@@ -373,6 +378,8 @@ function renderMessage(title, text) {
 }
 
 function renderProduct(p, offline) {
+  // Mode comparaison : le 2e produit ouvert affiche le comparatif
+  if (compareA && compareA.code !== p.code) { const a = compareA; endCompare(); return renderCompare(a, p); }
   const s = computeScore(p, settings.weights);
   const alerts = checkAlerts(p);
   const adds = p.additives.map(additiveInfo);
@@ -393,6 +400,12 @@ function renderProduct(p, offline) {
       <div class="big" style="background:${scoreColor(s.total)}">
         <b>${s.total ?? '?'}</b><small>${scoreLabel(s.total)}</small>
       </div>
+    </div>
+
+    <!-- Actions : liste de courses + comparaison -->
+    <div class="actions">
+      <button id="btn-list" class="ghost">+ Liste</button>
+      <button id="btn-compare" class="ghost">⇄ Comparer</button>
     </div>
 
     <!-- Alertes des profils -->
@@ -429,12 +442,35 @@ function renderProduct(p, offline) {
       </table>
     </div>
 
+    <!-- Meilleures alternatives (recherche à la demande : l'API limite les recherches) -->
+    ${(p.categories || []).length ? `<div class="card"><h2 style="margin-top:0">Meilleures alternatives</h2>
+      <button id="btn-alt" class="ghost">Chercher dans la même catégorie</button>
+      <ul id="alt-list" class="list" style="margin-top:.6rem"></ul></div>` : ''}
+
     <!-- Ingrédients + source -->
     <div class="card"><h2 style="margin-top:0">Ingrédients</h2>
       <p>${esc(p.ingredients) || '<span class="hint">Non renseignés</span>'}</p>
       <p class="hint">Source : <a href="${OFF_BASE}/product/${esc(p.code)}" target="_blank" rel="noopener">Open Food Facts</a> (ODbL) · code ${esc(p.code)}</p>
     </div>`;
   bindBack();
+  bindProductActions(p, s.total);
+}
+
+// Boutons de la fiche : liste, comparaison, alternatives
+async function bindProductActions(p, myScore) {
+  const btnList = $('#btn-list');
+  const setLabel = inList => (btnList.textContent = inList ? '✓ Dans la liste' : '+ Liste');
+  setLabel(!!(await DB.get('list', p.code)));
+  btnList.onclick = async () => setLabel(await toggleList(p));
+  $('#btn-compare').onclick = () => startCompare(p);
+  const btnAlt = $('#btn-alt');
+  if (btnAlt) btnAlt.onclick = () => findAlternatives(p, myScore);
+  const altList = $('#alt-list');
+  if (altList) altList.onclick = e => {
+    const li = e.target.closest('.item'); if (!li) return;
+    const x = altResults.find(q => q.code === li.dataset.code);
+    if (x) openProductData(x);
+  };
 }
 
 /* ---------- 11. LISTES (recherche + historique) ---------- */
@@ -588,6 +624,7 @@ const Sync = {
   // Met toutes les données locales en file (après connexion)
   async queueAll() {
     for (const h of await DB.all('history')) await this.queue('history', h.code, { ts: h.ts, p: await DB.get('products', h.code) });
+    for (const l of await DB.all('list')) await this.queue('list', l.code, { ts: l.ts, done: l.done, p: await DB.get('products', l.code) });
     await this.queue('settings', 'weights', settings.weights);
     await this.queue('profiles', 'all', settings.profiles);
   },
@@ -620,6 +657,12 @@ async function applyRemote(c) {
     if (c.deleted) await DB.del('history', c.key);
     else {
       await DB.put('history', { code: c.key, ts: c.data.ts });
+      if (c.data.p) await DB.put('products', c.data.p);
+    }
+  } else if (c.store === 'list') {
+    if (c.deleted) await DB.del('list', c.key);
+    else {
+      await DB.put('list', { code: c.key, ts: c.data.ts, done: !!c.data.done });
       if (c.data.p) await DB.put('products', c.data.p);
     }
   } else if (c.store === 'settings' && c.data) {
@@ -770,7 +813,267 @@ async function checkLiveUpdate() {
   } catch (_) { /* hors ligne ou serveur indisponible : on réessaiera */ }
 }
 
-/* ---------- 19. DÉMARRAGE ---------- */
+/* ---------- 19. LISTE DE COURSES ---------- */
+// Ajoute / retire un produit de la liste ; renvoie true s'il y est maintenant
+async function toggleList(p) {
+  if (await DB.get('list', p.code)) {
+    await DB.del('list', p.code);
+    Sync.queue('list', p.code, null, true);
+    return false;
+  }
+  const item = { code: p.code, ts: Date.now(), done: false };
+  await DB.put('list', item);
+  Sync.queue('list', p.code, { ts: item.ts, done: false, p });
+  return true;
+}
+
+async function renderList() {
+  const [items, prods] = await Promise.all([DB.all('list'), DB.all('products')]);
+  const by = Object.fromEntries(prods.map(p => [p.code, p]));
+  // Non cochés d'abord, puis les plus récents
+  const rows = items.filter(i => by[i.code]).sort((a, b) => a.done - b.done || b.ts - a.ts);
+  // Note du panier = moyenne des notes des produits
+  const scores = rows.map(i => computeScore(by[i.code], settings.weights).total).filter(v => v != null);
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  const nAlert = rows.filter(i => checkAlerts(by[i.code]).some(a => a.level === 'danger')).length;
+  $('#shop-summary').innerHTML = rows.length ? `
+    <div class="card head">
+      <div class="big" style="background:${scoreColor(avg)}"><b>${avg ?? '?'}</b><small>Panier</small></div>
+      <div class="t"><strong>${rows.length} produit(s)</strong>, ${rows.filter(i => i.done).length} coché(s)<br>
+      ${nAlert ? `<span class="lvl-high">⚠ ${nAlert} produit(s) avec alerte</span>` : '<span class="hint">Aucune alerte pour le foyer</span>'}</div>
+    </div>` : '';
+  $('#shop').innerHTML = rows.length
+    ? rows.map(i => {
+        const p = by[i.code], s = computeScore(p, settings.weights).total;
+        const danger = checkAlerts(p).some(a => a.level === 'danger');
+        return `<li class="item ${i.done ? 'done' : ''}" data-code="${esc(p.code)}">
+          <input type="checkbox" class="chk" ${i.done ? 'checked' : ''}>
+          ${p.img ? `<img src="${esc(p.img)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
+          <div class="txt"><div class="name">${danger ? '⚠ ' : ''}${esc(p.name)}</div><div class="brand">${esc(p.brand)}</div></div>
+          <span class="badge" style="background:${scoreColor(s)}">${s ?? '?'}</span>
+          <button class="del" title="Retirer">✕</button></li>`;
+      }).join('')
+    : '<p class="hint">Liste vide. Ajoute des produits depuis leur fiche (« + Liste »).</p>';
+}
+
+$('#shop').onclick = async e => {
+  const li = e.target.closest('.item'); if (!li) return;
+  const code = li.dataset.code;
+  if (e.target.classList.contains('chk')) {          // cocher / décocher
+    const it = await DB.get('list', code);
+    it.done = e.target.checked;
+    await DB.put('list', it);
+    Sync.queue('list', code, { ts: it.ts, done: it.done, p: await DB.get('products', code) });
+    return renderList();
+  }
+  if (e.target.classList.contains('del')) {          // retirer
+    await DB.del('list', code);
+    Sync.queue('list', code, null, true);
+    return renderList();
+  }
+  const p = await DB.get('products', code);          // ouvrir la fiche
+  if (p) { show('product'); renderProduct(p, !navigator.onLine); }
+};
+$('#btn-shop-clean').onclick = async () => {
+  for (const it of await DB.all('list')) if (it.done) { await DB.del('list', it.code); Sync.queue('list', it.code, null, true); }
+  renderList();
+};
+
+/* ---------- 20. COMPARATEUR (2 produits) ---------- */
+let compareA = null;
+function startCompare(p) {
+  compareA = p;
+  const b = $('#compare-banner');
+  b.innerHTML = `Comparaison avec <b>${esc(p.name)}</b> : scanne ou ouvre le 2e produit. <button class="ghost" id="cmp-cancel">Annuler</button>`;
+  b.hidden = false;
+  $('#cmp-cancel').onclick = endCompare;
+  show('scan');
+}
+function endCompare() { compareA = null; $('#compare-banner').hidden = true; }
+
+function renderCompare(a, b) {
+  const sa = computeScore(a, settings.weights), sb = computeScore(b, settings.weights);
+  const risky = p => p.additives.map(additiveInfo).filter(x => x.level !== 'other').length;
+  const dangers = p => checkAlerts(p).filter(x => x.level === 'danger').length;
+  // [libellé, valeur A, valeur B, sens : 1 = plus haut = mieux, -1 = plus bas = mieux]
+  const rows = [
+    ['Note Clair', sa.total, sb.total, 1],
+    ['Nutri-Score', a.nutri.toUpperCase() || null, b.nutri.toUpperCase() || null, -1],
+    ['NOVA', a.nova, b.nova, -1],
+    ['Additifs à risque', risky(a), risky(b), -1],
+    ['Énergie (kcal)', a.n.kcal, b.n.kcal, -1],
+    ['Sucres (g)', a.n.sugars, b.n.sugars, -1],
+    ['Gras saturés (g)', a.n.sat, b.n.sat, -1],
+    ['Sel (g)', a.n.salt, b.n.salt, -1],
+    ['Fibres (g)', a.n.fiber, b.n.fiber, 1],
+    ['Protéines (g)', a.n.prot, b.n.prot, 1],
+    ['Alertes foyer', dangers(a), dangers(b), -1]
+  ];
+  const empty = v => v == null || v === '';
+  const cell = (v, o, dir) => {
+    if (empty(v)) return '<td>—</td>';
+    const win = !empty(o) && v !== o && (dir > 0 ? v > o : v < o);
+    return `<td class="${win ? 'win' : ''}">${esc(typeof v === 'number' ? Math.round(v * 10) / 10 : v)}</td>`;
+  };
+  $('#v-product').innerHTML = `${backBtn()}
+    <div class="card" style="margin-top:.8rem"><h2 style="margin-top:0">Comparatif</h2>
+      <table class="cmp">
+        <tr><th></th>${[a, b].map(p => `<th data-code="${esc(p.code)}">${p.img ? `<img src="${esc(p.img)}" alt="">` : ''}<div>${esc(p.name)}</div></th>`).join('')}</tr>
+        ${rows.map(r => `<tr><td>${r[0]}</td>${cell(r[1], r[2], r[3])}${cell(r[2], r[1], r[3])}</tr>`).join('')}
+      </table>
+      <p class="hint">En vert : le meilleur des deux. Touche un produit pour ouvrir sa fiche.</p>
+    </div>`;
+  bindBack();
+  $('#v-product').querySelectorAll('th[data-code]').forEach(th => th.onclick = async () => {
+    const p = await DB.get('products', th.dataset.code); if (p) renderProduct(p, false);
+  });
+}
+
+/* ---------- 21. MEILLEURES ALTERNATIVES ---------- */
+// Même catégorie (la plus précise), notées avec TES poids, sans alerte du foyer
+let altResults = [];
+async function findAlternatives(p, myScore) {
+  const box = $('#alt-list'), btn = $('#btn-alt');
+  btn.disabled = true; btn.textContent = 'Recherche…';
+  try {
+    const cat = p.categories[p.categories.length - 1];
+    const r = await fetch(urlAlt(cat));
+    if (r.status === 429) throw new Error('Trop de recherches d’affilée : réessaie dans une minute.');
+    const j = await r.json();
+    const best = (j.products || []).filter(x => x.code && x.code !== p.code).map(normalize)
+      .map(x => ({ p: x, s: computeScore(x, settings.weights).total }))
+      .filter(x => x.s != null && (myScore == null || x.s > myScore) && !checkAlerts(x.p).some(a => a.level === 'danger'))
+      .sort((a, b) => b.s - a.s).slice(0, 5);
+    altResults = best.map(x => x.p);
+    box.innerHTML = best.length ? altResults.map(x => itemHTML(x, false)).join('')
+      : '<p class="hint">Pas de meilleure alternative trouvée dans cette catégorie.</p>';
+    btn.hidden = true;
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Réessayer';
+    box.innerHTML = `<p class="hint">${esc(e.message || 'Erreur réseau')}</p>`;
+  }
+}
+
+/* ---------- 22. AJOUT D'UN PRODUIT DANS OPEN FOOD FACTS ---------- */
+const PHOTOS = [
+  { field: 'front_fr', label: 'Photo face avant' },
+  { field: 'ingredients_fr', label: 'Photo des ingrédients' },
+  { field: 'nutrition_fr', label: 'Photo du tableau nutritionnel' }
+];
+const NUTRI_FIELDS = [
+  { key: 'energy-kcal', label: 'Énergie (kcal)', unit: 'kcal' },
+  { key: 'fat', label: 'Matières grasses (g)', unit: 'g' },
+  { key: 'saturated-fat', label: 'dont saturées (g)', unit: 'g' },
+  { key: 'carbohydrates', label: 'Glucides (g)', unit: 'g' },
+  { key: 'sugars', label: 'dont sucres (g)', unit: 'g' },
+  { key: 'fiber', label: 'Fibres (g)', unit: 'g' },
+  { key: 'proteins', label: 'Protéines (g)', unit: 'g' },
+  { key: 'salt', label: 'Sel (g)', unit: 'g' }
+];
+
+async function renderAddForm(code) {
+  // Identifiants Open Food Facts : gardés sur le téléphone uniquement
+  const off = await DB.get('kv', 'off');
+  $('#v-product').innerHTML = `${backBtn()}
+    <div class="card" style="margin-top:.8rem">
+      <h2 style="margin-top:0">Produit inconnu</h2>
+      <p class="hint">Le code ${esc(code)} n’est pas dans Open Food Facts. Ajoute-le : ta contribution servira à tous.</p>
+      <div class="form">
+        ${off
+          ? `<p class="hint">Compte Open Food Facts : <b>${esc(off.user)}</b> <button class="ghost" id="off-change" type="button">Changer</button></p>`
+          : `<p class="hint">Il faut un compte Open Food Facts (gratuit) : <a href="https://world.openfoodfacts.org/cgi/user.pl" target="_blank" rel="noopener">créer un compte</a>.</p>
+             <input id="off-user" placeholder="Identifiant Open Food Facts (pas l’e-mail)" autocomplete="username">
+             <input id="off-pass" type="password" placeholder="Mot de passe Open Food Facts" autocomplete="current-password">`}
+        <h3>Photos</h3>
+        ${PHOTOS.map(ph => `<label class="photo">${ph.label}<input type="file" accept="image/*" capture="environment" data-field="${ph.field}"></label>`).join('')}
+        <h3>Informations</h3>
+        <input id="add-name" placeholder="Nom du produit *">
+        <input id="add-brand" placeholder="Marque">
+        <input id="add-qty" placeholder="Quantité (ex : 500 g)">
+        <input id="add-cat" placeholder="Catégorie (ex : Yaourts nature)">
+        <textarea id="add-ingr" placeholder="Ingrédients, tels qu’écrits sur l’emballage"></textarea>
+        <h3>Valeurs pour 100 g (facultatif)</h3>
+        <div class="grid2">${NUTRI_FIELDS.map(f => `<input type="number" step="any" inputmode="decimal" data-n="${f.key}" placeholder="${f.label}">`).join('')}</div>
+        <button id="add-send" class="primary" type="button">Envoyer à Open Food Facts</button>
+        <p id="add-msg" class="hint"></p>
+      </div>
+    </div>`;
+  bindBack();
+  const change = $('#off-change');
+  if (change) change.onclick = async () => { await DB.del('kv', 'off'); renderAddForm(code); };
+  $('#add-send').onclick = () => sendProduct(code);
+}
+
+async function sendProduct(code) {
+  const msg = t => ($('#add-msg').textContent = t);
+  let off = await DB.get('kv', 'off');
+  if (!off) {
+    const user = $('#off-user').value.trim(), pass = $('#off-pass').value;
+    if (!user || !pass) return msg('Identifiant et mot de passe Open Food Facts requis.');
+    off = { user, pass };
+  }
+  const name = $('#add-name').value.trim();
+  if (!name) return msg('Le nom du produit est obligatoire.');
+
+  // 1. Informations texte + valeurs nutritionnelles
+  const f = new FormData();
+  const add = (k, v) => { if (v !== '' && v != null) f.append(k, v); };
+  add('code', code); add('user_id', off.user); add('password', off.pass);
+  add('lang', 'fr'); add('app_name', 'Clair'); add('app_version', APP_VERSION);
+  add('comment', 'Ajout via l’appli Clair');
+  add('product_name', name);
+  add('brands', $('#add-brand').value.trim());
+  add('quantity', $('#add-qty').value.trim());
+  add('categories', $('#add-cat').value.trim());
+  add('ingredients_text_fr', $('#add-ingr').value.trim());
+  let hasN = false;
+  document.querySelectorAll('[data-n]').forEach(i => {
+    if (i.value === '') return;
+    const nf = NUTRI_FIELDS.find(x => x.key === i.dataset.n);
+    add('nutriment_' + nf.key, i.value); add('nutriment_' + nf.key + '_unit', nf.unit); hasN = true;
+  });
+  if (hasN) add('nutrition_data_per', '100g');
+
+  msg('Envoi des informations…');
+  try {
+    const r = await fetch(`${OFF_BASE}/cgi/product_jqm2.pl`, { method: 'POST', body: f });
+    const j = await r.json();
+    if (j.status !== 1) throw new Error(j.status_verbose || 'refusé (identifiants Open Food Facts ?)');
+    await DB.put('kv', off, 'off'); // identifiants valides : on les garde
+
+    // 2. Photos (réduites à 1600 px pour limiter les données)
+    const inputs = [...document.querySelectorAll('input[data-field]')].filter(i => i.files[0]);
+    for (const [k, inp] of inputs.entries()) {
+      msg(`Envoi des photos (${k + 1}/${inputs.length})…`);
+      const g = new FormData();
+      g.append('code', code); g.append('user_id', off.user); g.append('password', off.pass);
+      g.append('imagefield', inp.dataset.field);
+      g.append('imgupload_' + inp.dataset.field, await shrinkImage(inp.files[0]), inp.dataset.field + '.jpg');
+      await fetch(`${OFF_BASE}/cgi/product_image_upload.pl`, { method: 'POST', body: g });
+    }
+    msg('Merci ! Produit ajouté à Open Food Facts.');
+    setTimeout(() => openProduct(code), 1500);
+  } catch (e) { msg('Échec de l’envoi : ' + (e.message || 'erreur réseau')); }
+}
+
+// Réduit une photo (max 1600 px) et la convertit en JPEG
+function shrinkImage(file, max = 1600) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      c.toBlob(b => (b ? res(b) : rej(new Error('photo illisible'))), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => rej(new Error('photo illisible'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* ---------- 23. DÉMARRAGE ---------- */
 function updateNet() { $('#net').textContent = navigator.onLine ? '' : '● Hors ligne'; }
 window.addEventListener('online', () => { updateNet(); Sync.run().catch(() => {}); });
 window.addEventListener('offline', updateNet);
