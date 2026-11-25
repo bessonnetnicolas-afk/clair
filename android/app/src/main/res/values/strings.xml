@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Clair</string>
+    <string name="title_activity_main">Clair</string>
+    <string name="package_name">space.bessonnetnicolas.clair</string>
+    <string name="custom_url_scheme">space.bessonnetnicolas.clair</string>
+</resources>
